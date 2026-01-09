@@ -122,7 +122,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         if (!rows || rows.length === 0) {
-          return interaction.editReply("Няма данни още. Пишете малко чат да събира XP 🙂");
+          return interaction.editReply("No data yet. Send some messages in chat to earn XP 🙂");
+
         }
 
         const lines = rows.map((r, i) => {
