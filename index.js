@@ -1,30 +1,33 @@
 // index.js
-process.on("unhandledRejection", console.error);
-process.on("uncaughtException", console.error);
-
-
-
-
+process.on("unhandledRejection", (err) => console.error("unhandledRejection:", err));
+process.on("uncaughtException", (err) => console.error("uncaughtException:", err));
 
 const { Client, GatewayIntentBits } = require("discord.js");
 const db = require("./database.js");
+const config = require("./config.json");
 
+// Token from Railway / Environment (NOT in config.json)
 const token = process.env.DISCORD_TOKEN;
 
+if (!token) {
+  console.error("❌ DISCORD_TOKEN is missing! Add it in Railway Variables.");
+  process.exit(1);
+}
 
-// настройки (с дефолти)
+// settings (with defaults)
 const xpCooldown = Number(config.xpCooldown ?? 60);
 const xpMin = Number(config.xpMin ?? 5);
 const xpMax = Number(config.xpMax ?? 7);
 const levelsForRole = Number(config.levelsForRole ?? 5);
-const roleToGive = config.roleToGive; // string id или undefined
+const roleToGive = config.roleToGive || null; // role ID or null
 
 console.log("🚀 index.js is online");
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages, // достатъчно за messageCreate
+    GatewayIntentBits.GuildMessages, // enough for messageCreate event
+    // NOTE: We DO NOT need MessageContent because we don't read message.content
   ],
 });
 
@@ -36,66 +39,91 @@ client.once("ready", () => {
 });
 
 /**
+ * Helper: safe editReply
+ */
+async function safeEdit(interaction, content) {
+  try {
+    if (interaction.deferred || interaction.replied) return await interaction.editReply(content);
+    return await interaction.reply({ content, ephemeral: true });
+  } catch (_) {}
+}
+
+/**
  * /lvl - shows XP + level
- * Никога не трябва да дава "did not respond"
+ * /leaderboard - shows top 10 by XP in the server
  */
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName !== "lvl") return;
 
-  // Лог за дебъг
-  console.log("INTERACTION:", interaction.commandName, "from", interaction.user.tag);
+  const cmd = interaction.commandName;
+
+  if (cmd !== "lvl" && cmd !== "leaderboard") return;
+
+  console.log("INTERACTION:", cmd, "from", interaction.user?.tag);
 
   try {
+    // prevents 3s timeout
     await interaction.deferReply({ ephemeral: false });
 
     const guildId = interaction.guild?.id;
-    if (!guildId) {
-      return interaction.editReply("This command works only in a server.");
-    }
+    if (!guildId) return safeEdit(interaction, "This command works only in a server.");
 
     const userId = interaction.user.id;
 
-    // fallback ако DB забие (примерно locked)
+    // fallback if DB is slow/locked
     const fallbackTimer = setTimeout(() => {
       if (interaction.deferred && !interaction.replied) {
         interaction.editReply("⏳ Still loading... (DB is slow/locked)").catch(() => {});
       }
     }, 2000);
 
-    db.get(
-      "SELECT xp, level FROM xp WHERE userId = ? AND guildId = ?",
-      [userId, guildId],
-      (err, row) => {
+    if (cmd === "lvl") {
+      db.get(
+        "SELECT xp, level FROM xp WHERE userId = ? AND guildId = ?",
+        [userId, guildId],
+        (err, row) => {
+          clearTimeout(fallbackTimer);
+
+          if (err) {
+            console.error("DB error in /lvl:", err);
+            return interaction.editReply("❌ Database error (check logs).");
+          }
+
+          if (!row) return interaction.editReply("You don't have any XP yet 😅");
+
+          return interaction.editReply(`📊 **Level:** ${row.level}\n⭐ **XP:** ${row.xp}`);
+        }
+      );
+      return;
+    }
+
+    // /leaderboard
+    db.all(
+      "SELECT userId, xp, level FROM xp WHERE guildId = ? ORDER BY xp DESC LIMIT 10",
+      [guildId],
+      async (err, rows) => {
         clearTimeout(fallbackTimer);
 
         if (err) {
-          console.error("DB error in /lvl:", err);
-          return interaction.editReply("❌ Database error (check console).");
+          console.error("DB error in /leaderboard:", err);
+          return interaction.editReply("❌ Database error (check logs).");
         }
 
-        if (!row) {
-          return interaction.editReply("You don't have any XP yet 😅");
+        if (!rows || rows.length === 0) {
+          return interaction.editReply("Няма данни още. Пишете малко чат да събира XP 🙂");
         }
 
-        return interaction.editReply(
-          `📊 **Level:** ${row.level}\n⭐ **XP:** ${row.xp}`
-        );
+        const lines = rows.map((r, i) => {
+          const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "▫️";
+          return `${medal} **${i + 1}.** <@${r.userId}> — **Lvl ${r.level}** — **${r.xp} XP**`;
+        });
+
+        return interaction.editReply(`🏆 **Leaderboard (Top 10)**\n\n${lines.join("\n")}`);
       }
     );
   } catch (err) {
     console.error("Interaction error:", err);
-
-    // ако вече е deferred/replied -> editReply
-    if (interaction.deferred || interaction.replied) {
-      return interaction.editReply("❌ Something went wrong.").catch(() => {});
-    }
-
-    // иначе normal reply
-    return interaction.reply({
-      content: "❌ Something went wrong.",
-      ephemeral: true,
-    }).catch(() => {});
+    return safeEdit(interaction, "❌ Something went wrong.");
   }
 });
 
@@ -116,7 +144,6 @@ client.on("messageCreate", (message) => {
     cooldowns.add(key);
     setTimeout(() => cooldowns.delete(key), xpCooldown * 1000);
 
-    // random XP between xpMin and xpMax (inclusive)
     const earned = Math.floor(Math.random() * (xpMax - xpMin + 1)) + xpMin;
 
     db.get(
@@ -150,9 +177,7 @@ client.on("messageCreate", (message) => {
         if (roleToGive && newLevel === levelsForRole) {
           const role = message.guild.roles.cache.get(roleToGive);
           if (role && message.member) {
-            message.member.roles.add(role).catch((e) => {
-              console.error("Role add error:", e);
-            });
+            message.member.roles.add(role).catch((e) => console.error("Role add error:", e));
           }
         }
 
