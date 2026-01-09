@@ -8,9 +8,9 @@ process.on("uncaughtException", console.error);
 
 const { Client, GatewayIntentBits } = require("discord.js");
 const db = require("./database.js");
-const config = require("./config.json");
 
-const token = config.token;
+const token = process.env.DISCORD_TOKEN;
+
 
 // настройки (с дефолти)
 const xpCooldown = Number(config.xpCooldown ?? 60);
