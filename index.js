@@ -2,9 +2,17 @@
 process.on("unhandledRejection", (err) => console.error("unhandledRejection:", err));
 process.on("uncaughtException", (err) => console.error("uncaughtException:", err));
 
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, Events } = require("discord.js");
 const db = require("./database.js");
-const config = require("./config.json");
+
+// Settings from config.json (NO token inside)
+let config = {};
+try {
+  config = require("./config.json");
+} catch (e) {
+  console.warn("⚠️ config.json not found or invalid. Using defaults.");
+  config = {};
+}
 
 // Token from Railway / Environment (NOT in config.json)
 const token = process.env.DISCORD_TOKEN;
@@ -27,37 +35,40 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages, // enough for messageCreate event
-    // NOTE: We DO NOT need MessageContent because we don't read message.content
   ],
 });
 
 // cooldown per user per guild
 const cooldowns = new Set();
 
-client.once("ready", () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+// Discord.js v14+ "ready" is Events.ClientReady
+client.once(Events.ClientReady, (c) => {
+  console.log(`✅ Logged in as ${c.user.tag}`);
 });
 
 /**
- * Helper: safe editReply
+ * Helper: safe reply/edit that won't crash
  */
-async function safeEdit(interaction, content) {
+async function safeRespond(interaction, content, ephemeral = false) {
   try {
-    if (interaction.deferred || interaction.replied) return await interaction.editReply(content);
-    return await interaction.reply({ content, ephemeral: true });
-  } catch (_) {}
+    if (interaction.deferred || interaction.replied) {
+      return await interaction.editReply(content);
+    }
+    return await interaction.reply({ content, ephemeral });
+  } catch (e) {
+    // ignore
+  }
 }
 
 /**
- * /lvl - shows XP + level
+ * /lvl + /rank - shows XP + level
  * /leaderboard - shows top 10 by XP in the server
  */
-client.on("interactionCreate", async (interaction) => {
+client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   const cmd = interaction.commandName;
-
-  if (cmd !== "lvl" && cmd !== "leaderboard") return;
+  if (cmd !== "lvl" && cmd !== "rank" && cmd !== "leaderboard") return;
 
   console.log("INTERACTION:", cmd, "from", interaction.user?.tag);
 
@@ -66,7 +77,7 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply({ ephemeral: false });
 
     const guildId = interaction.guild?.id;
-    if (!guildId) return safeEdit(interaction, "This command works only in a server.");
+    if (!guildId) return safeRespond(interaction, "This command works only in a server.", true);
 
     const userId = interaction.user.id;
 
@@ -77,7 +88,8 @@ client.on("interactionCreate", async (interaction) => {
       }
     }, 2000);
 
-    if (cmd === "lvl") {
+    // /lvl or /rank
+    if (cmd === "lvl" || cmd === "rank") {
       db.get(
         "SELECT xp, level FROM xp WHERE userId = ? AND guildId = ?",
         [userId, guildId],
@@ -101,7 +113,7 @@ client.on("interactionCreate", async (interaction) => {
     db.all(
       "SELECT userId, xp, level FROM xp WHERE guildId = ? ORDER BY xp DESC LIMIT 10",
       [guildId],
-      async (err, rows) => {
+      (err, rows) => {
         clearTimeout(fallbackTimer);
 
         if (err) {
@@ -123,17 +135,17 @@ client.on("interactionCreate", async (interaction) => {
     );
   } catch (err) {
     console.error("Interaction error:", err);
-    return safeEdit(interaction, "❌ Something went wrong.");
+    return safeRespond(interaction, "❌ Something went wrong.", true);
   }
 });
 
 /**
  * XP gain on message
  */
-client.on("messageCreate", (message) => {
+client.on(Events.MessageCreate, (message) => {
   try {
-    if (message.author.bot) return;
     if (!message.guild) return;
+    if (message.author?.bot) return;
 
     const userId = message.author.id;
     const guildId = message.guild.id;
