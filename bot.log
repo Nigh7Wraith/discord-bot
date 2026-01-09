@@ -1,0 +1,19 @@
+🚀 index.js is online
+✅ Logged in as Balkan bot#5323
+(node:22740) DeprecationWarning: The ready event has been renamed to clientReady to distinguish it from the gateway READY event and will only emit under that name in v15. Please use clientReady instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+^C🚀 index.js is online
+✅ Logged in as Balkan bot#5323
+(node:11356) DeprecationWarning: The ready event has been renamed to clientReady to distinguish it from the gateway READY event and will only emit under that name in v15. Please use clientReady instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+^C🚀 index.js is online
+✅ Logged in as Balkan bot#5323
+(node:20128) DeprecationWarning: The ready event has been renamed to clientReady to distinguish it from the gateway READY event and will only emit under that name in v15. Please use clientReady instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+^C🚀 index.js is online
+✅ Logged in as Balkan bot#5323
+(node:25144) DeprecationWarning: The ready event has been renamed to clientReady to distinguish it from the gateway READY event and will only emit under that name in v15. Please use clientReady instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+INTERACTION: lvl from nigh7wraith
+(node:25144) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+^C
